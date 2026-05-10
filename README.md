@@ -2,7 +2,7 @@
 
 A terminal tool for finding and cleaning duplicate songs in your YouTube Music liked songs.
 
-It scans the YouTube Music liked-songs playlist (`LM`), shows duplicate groups, writes backups, and can unlike duplicate copies after you confirm the cleanup plan.
+It scans your YouTube Music liked-songs playlist, shows duplicate groups, writes backups, and can unlike duplicate copies after you confirm the cleanup plan.
 
 ## Duplicate rules
 
@@ -20,8 +20,6 @@ git clone https://github.com/andrew-gromyko/yt-music-playlist-janitor.git
 cd yt-music-playlist-janitor
 python3 playlist_janitor.py
 ```
-
-No third-party Python packages are required.
 
 ## Usage
 
@@ -99,48 +97,18 @@ The saved authorization was created with a narrower scope. Run **Setup OAuth** a
 
 Cleanup is never automatic.
 
-Before cleanup, Playlist Janitor writes:
+Before cleanup, Playlist Janitor saves and writes:
 
 - `duplicate_report/full_dedupe_backups/<timestamp>/liked_music_before.csv`
 - `duplicate_report/full_dedupe_backups/<timestamp>/dedupe_plan.json`
-
-After cleanup, it writes:
-
-- `duplicate_report/full_dedupe_backups/<timestamp>/liked_music_after.csv`
-- `duplicate_report/full_dedupe_backups/<timestamp>/execution_log.json`
-- `duplicate_report/full_dedupe_backups/<timestamp>/after_summary.json`
 
 The final cleanup step requires typing:
 
 ```text
 DEDUPE
 ```
-
-## Credential storage
-
-On macOS, OAuth client values and refresh tokens are stored in Keychain.
-
-On other systems, they are stored in a user-only config file:
+On macOS, OAuth client values and refresh tokens are stored in Keychain. On other systems, they are stored in a user-only config file:
 
 ```text
 ~/.config/yt-music-playlist-janitor/credentials.json
 ```
-
-## Direct commands
-
-The interactive UI is the recommended workflow, but these commands are available:
-
-```bash
-python3 playlist_janitor.py setup
-python3 playlist_janitor.py scan
-python3 playlist_janitor.py show
-python3 playlist_janitor.py plan
-python3 playlist_janitor.py dedupe
-python3 playlist_janitor.py status
-```
-
-## Notes
-
-YouTube Music liked songs are exposed as playlist `LM`. The normal YouTube liked-videos playlist is `LL`; this project uses `LM`.
-
-The YouTube Data API quota cost for `videos.rate` is 50 units per call. The cleanup plan shows the estimated quota before it runs.
