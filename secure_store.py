@@ -63,6 +63,17 @@ def _keychain_set(account: str, value: str) -> bool:
     return proc.returncode == 0
 
 
+def _keychain_delete(account: str) -> None:
+    if not _security_cmd_available():
+        return
+    subprocess.run(
+        ["security", "delete-generic-password", "-s", SERVICE, "-a", account],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
 def _read_file_store() -> dict:
     if not CONFIG_FILE.exists():
         return {}
@@ -100,6 +111,14 @@ def set_value(key: str, value: str) -> None:
     _write_file_store(data)
 
 
+def delete_value(key: str) -> None:
+    _keychain_delete(key)
+    data = _read_file_store()
+    if key in data:
+        del data[key]
+        _write_file_store(data)
+
+
 def has_client_credentials() -> bool:
     return bool(get_value("client_id") and get_value("client_secret"))
 
@@ -115,6 +134,7 @@ def get_client_credentials() -> Optional[ClientCredentials]:
 def save_client_credentials(client_id: str, client_secret: str) -> None:
     set_value("client_id", client_id.strip())
     set_value("client_secret", client_secret.strip())
+    clear_refresh_token()
 
 
 def prompt_for_client_credentials() -> ClientCredentials:
@@ -137,3 +157,7 @@ def get_refresh_token() -> Optional[str]:
 
 def save_refresh_token(refresh_token: str) -> None:
     set_value("refresh_token", refresh_token.strip())
+
+
+def clear_refresh_token() -> None:
+    delete_value("refresh_token")

@@ -41,7 +41,7 @@ Menu actions:
 - **Show duplicates**: view duplicate groups in the terminal
 - **Preview plan**: create a before-backup and cleanup plan without changing likes
 - **Execute dedupe**: remove duplicates after typed confirmation
-- **Setup OAuth**: save or replace Google OAuth credentials
+- **Setup OAuth**: save or replace Google OAuth credentials, authorize the account, then run a first scan
 
 The main screen shows the latest local duplicate status and how long ago the last live scan ran. Before cleanup, the app refreshes the scan automatically if it is more than 20 minutes old.
 
@@ -61,7 +61,9 @@ Playlist Janitor uses your own Google Cloud OAuth client. It never asks for your
    - Copy the client ID and client secret
 9. Run `python3 playlist_janitor.py`.
 10. Choose **Setup OAuth** and paste the client values.
-11. Run **Smart scan** and complete the Google device-code authorization.
+11. Complete the Google device-code authorization shown in the terminal.
+
+After authorization succeeds, Playlist Janitor runs the first scan automatically.
 
 The app requests this YouTube scope:
 
@@ -107,6 +109,7 @@ The final cleanup step requires typing:
 ```text
 DEDUPE
 ```
+
 On macOS, OAuth client values and refresh tokens are stored in Keychain. On other systems, they are stored in a user-only config file:
 
 ```text

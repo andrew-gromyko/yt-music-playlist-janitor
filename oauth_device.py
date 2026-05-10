@@ -7,7 +7,7 @@ import time
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Callable, Dict, Optional
 
 
 YOUTUBE_SCOPE = "https://www.googleapis.com/auth/youtube"
@@ -66,8 +66,23 @@ class OAuthDeviceClient:
             },
         )
 
-    def poll_for_token(self, device_code: str, interval_seconds: int = 5) -> TokenData:
+    def _sleep(self, seconds: int, should_cancel: Optional[Callable[[], bool]]) -> None:
+        deadline = time.time() + seconds
+        while time.time() < deadline:
+            if should_cancel and should_cancel():
+                raise OAuthError("Authorization cancelled.")
+            time.sleep(min(0.25, max(0, deadline - time.time())))
+
+    def poll_for_token(
+        self,
+        device_code: str,
+        interval_seconds: int = 5,
+        should_cancel: Optional[Callable[[], bool]] = None,
+    ) -> TokenData:
         while True:
+            if should_cancel and should_cancel():
+                raise OAuthError("Authorization cancelled.")
+
             response = self._post_form(
                 TOKEN_URL,
                 {
@@ -90,11 +105,11 @@ class OAuthDeviceClient:
 
             error = response.get("error")
             if error == "authorization_pending":
-                time.sleep(interval_seconds)
+                self._sleep(interval_seconds, should_cancel)
                 continue
             if error == "slow_down":
                 interval_seconds += 5
-                time.sleep(interval_seconds)
+                self._sleep(interval_seconds, should_cancel)
                 continue
             raise OAuthError(f"OAuth device flow failed: {response}")
 
