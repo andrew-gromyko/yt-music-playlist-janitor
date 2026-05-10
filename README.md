@@ -61,7 +61,8 @@ Playlist Janitor uses your own Google Cloud OAuth client. It never asks for your
    - Copy the client ID and client secret
 9. Run `python3 playlist_janitor.py`.
 10. Choose **Setup OAuth** and paste the client values.
-11. Complete the Google device-code authorization shown in the terminal.
+11. Complete the Google device-code authorization shown in the terminal. Press `o` on the authorization screen to open the Google URL in your browser.
+12. Log in with the same Google account you use for YouTube Music.
 
 After authorization succeeds, Playlist Janitor runs the first scan automatically.
 

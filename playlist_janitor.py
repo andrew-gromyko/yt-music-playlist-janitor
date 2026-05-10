@@ -14,6 +14,7 @@ import re
 import sys
 import threading
 import time
+import webbrowser
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
@@ -124,6 +125,7 @@ def require_live_access() -> str:
     print("Authorize this app:")
     print(f"  1. Open {verification_url}")
     print(f"  2. Enter code {user_code}")
+    print("  3. Log in with the same Google account you use for YouTube Music")
     print()
     print("Waiting for Google authorization...")
 
@@ -705,18 +707,22 @@ def _authorize_oauth_screen(stdscr: "curses._CursesWindow") -> bool:
     spinner = ["|", "/", "-", "\\"]
     frame = 0
     stopping = False
+    browser_message = ""
     while True:
         stdscr.clear()
         h, w = stdscr.getmaxyx()
         stdscr.addnstr(0, 2, "Authorize Google Account", max(1, w - 4), curses.color_pair(1) | curses.A_BOLD)
-        hint = "q/backspace cancels | waiting for current request to stop" if stopping else "q/backspace cancels"
+        hint = "q/backspace cancels | waiting for current request to stop" if stopping else "o opens browser | q/backspace cancels"
         stdscr.addnstr(1, 2, hint, max(1, w - 4), curses.color_pair(4))
         stdscr.addnstr(3, 2, "1. Open this URL:", max(1, w - 4), curses.A_BOLD)
         stdscr.addnstr(4, 5, str(verification_url), max(1, w - 7), curses.color_pair(4))
         stdscr.addnstr(6, 2, "2. Enter this code:", max(1, w - 4), curses.A_BOLD)
         stdscr.addnstr(7, 5, str(user_code), max(1, w - 7), curses.color_pair(3) | curses.A_BOLD)
+        stdscr.addnstr(9, 2, "3. Log in with the same Google account you use for YouTube Music.", max(1, w - 4), curses.A_BOLD)
         status = "Stopping..." if stopping else f"Waiting for Google authorization... {spinner[frame % len(spinner)]}"
-        stdscr.addnstr(9, 2, status, max(1, w - 4), curses.color_pair(3))
+        stdscr.addnstr(11, 2, status, max(1, w - 4), curses.color_pair(3))
+        if browser_message:
+            stdscr.addnstr(13, 2, browser_message, max(1, w - 4), curses.color_pair(4))
         stdscr.refresh()
 
         try:
@@ -738,6 +744,11 @@ def _authorize_oauth_screen(stdscr: "curses._CursesWindow") -> bool:
         if ch in (ord("q"), 27, curses.KEY_BACKSPACE, 127):
             cancel_event.set()
             stopping = True
+        elif ch == ord("o") and not stopping:
+            if webbrowser.open(str(verification_url)):
+                browser_message = "Opened the authorization URL in your browser."
+            else:
+                browser_message = "Could not open browser automatically. Copy the URL above."
         frame += 1
 
 
