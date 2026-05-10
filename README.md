@@ -6,6 +6,8 @@ It scans your YouTube Music liked-songs playlist, shows duplicate groups, writes
 
 This repo fully vibe-coded with Codex GPT-5.5.
 
+![Playlist Janitor terminal UI](docs/assets/screenshot.png)
+
 ## Duplicate rules
 
 A song is treated as a duplicate when either rule matches:
