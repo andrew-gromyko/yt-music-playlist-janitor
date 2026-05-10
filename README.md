@@ -4,7 +4,7 @@ A terminal tool for finding and cleaning duplicate songs in your YouTube Music l
 
 It scans your YouTube Music liked-songs playlist, shows duplicate groups, writes backups, and can unlike duplicate copies after you confirm the cleanup plan.
 
-This was fully vibe-coded with Codex GPT-5.5.
+This repo fully vibe-coded with Codex GPT-5.5.
 
 ## Duplicate rules
 
@@ -30,12 +30,6 @@ Run the interactive CLI:
 ```bash
 python3 playlist_janitor.py
 ```
-
-Controls:
-
-- Arrow keys or `j` / `k`: move
-- Enter: select
-- `q`, Esc, or Backspace: return or cancel
 
 Menu actions:
 
@@ -113,7 +107,7 @@ The final cleanup step requires typing:
 DEDUPE
 ```
 
-On macOS, OAuth client values and refresh tokens are stored in Keychain. On other systems, they are stored in a user-only config file:
+On macOS, OAuth client values and refresh tokens are stored in Keychain. On other systems, they are stored in a config file:
 
 ```text
 ~/.config/yt-music-playlist-janitor/credentials.json
