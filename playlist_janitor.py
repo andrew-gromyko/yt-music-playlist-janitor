@@ -14,15 +14,14 @@ import re
 import sys
 import threading
 import time
-import webbrowser
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
-import analyze_duplicates as analysis
-import dedupe_core as live
-import secure_store
-from oauth_device import OAuthDeviceClient
+from utils import analyze_duplicates as analysis
+from utils import dedupe_core as live
+from utils import secure_store
+from utils.oauth_device import OAuthDeviceClient
 
 
 BASE_DIR = Path("/Users/andrew/Documents/git/yt-music-dedup")
@@ -33,6 +32,15 @@ COMPONENTS_CSV = REPORT_DIR / "duplicate_components_combined.csv"
 BACKUP_ROOT = REPORT_DIR / "full_dedupe_backups"
 STALE_SCAN_SECONDS = 20 * 60
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
+GOOGLE_CLOUD_CONSOLE_URL = "https://console.developers.google.com/"
+OAUTH_SETUP_CONSOLE_LINES = [
+    f"Google Cloud Console: {GOOGLE_CLOUD_CONSOLE_URL}",
+    "Create/select a project and enable YouTube Data API v3.",
+    "OAuth consent screen: User type External, Publishing status Testing, add your account as a Test user.",
+    "Create OAuth client: Application type = TVs and Limited Input devices.",
+    "Paste that client ID and client secret below.",
+]
+CTRL_C = 3
 
 
 class Cancelled(RuntimeError):
@@ -72,7 +80,7 @@ def title(text: str) -> str:
 
 def print_header() -> None:
     print()
-    print(title("YouTube Music Dedup"))
+    print(title("YT Music Playlist Janitor"))
     print(color("Liked songs, duplicate scan, and careful cleanup.", C.dim))
     print()
 
@@ -175,7 +183,7 @@ def format_age(seconds: Optional[float]) -> str:
         return "never"
     seconds = int(seconds)
     if seconds < 60:
-        return f"{seconds}s ago"
+        return "<1 min ago"
     minutes = seconds // 60
     if minutes < 60:
         return f"{minutes}m ago"
@@ -423,7 +431,7 @@ def _stats_lines() -> List[str]:
             stats = None
 
     if not stats:
-        return [f"Last live scan          {format_age(last_scan_age_seconds())}", "No local report yet. Run Smart scan first."]
+        return [f"Last live scan          {format_age(last_scan_age_seconds())}", "No local report yet. Run Scan first."]
 
     return [
         f"Last live scan          {format_age(last_scan_age_seconds())}",
@@ -437,7 +445,7 @@ def _stats_lines() -> List[str]:
 
 def _duplicate_preview_lines(limit: int = 30) -> List[str]:
     if not COMPONENTS_CSV.exists():
-        return ["No duplicate report yet. Run Smart scan first."]
+        return ["No duplicate report yet. Run Scan first."]
 
     with COMPONENTS_CSV.open(newline="", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
@@ -627,43 +635,164 @@ def _read_field(stdscr: "curses._CursesWindow", y: int, x: int, secret: bool = F
             value += chr(ch)
 
 
-def _setup_oauth_screen(stdscr: "curses._CursesWindow", run_scan_after: bool = True) -> None:
+def _consume_escape_sequence(stdscr: "curses._CursesWindow") -> str:
+    """Consume a short terminal escape sequence without eating pasted text."""
+    try:
+        stdscr.timeout(1)
+        ch = stdscr.getch()
+        if ch == -1:
+            return "escape"
+        if ch != ord("["):
+            return "escape_sequence"
+
+        seq = "["
+        while len(seq) < 8:
+            ch = stdscr.getch()
+            if ch == -1:
+                break
+            seq += chr(ch) if 0 <= ch <= 255 else ""
+            if ch == ord("~") or 64 <= ch <= 126:
+                break
+        if seq in ("[200~", "[201~"):
+            return "paste_marker"
+        return "escape_sequence"
+    finally:
+        stdscr.timeout(-1)
+
+
+def _retry_credentials_prompt(stdscr: "curses._CursesWindow", text: str) -> Tuple[bool, str]:
+    while True:
+        stdscr.clear()
+        h, w = stdscr.getmaxyx()
+        stdscr.addnstr(0, 2, "Authorize Google Account", max(1, w - 4), curses.color_pair(1) | curses.A_BOLD)
+        stdscr.addnstr(1, 2, "Enter retries credentials | q/Esc cancels", max(1, w - 4), curses.color_pair(4))
+        stdscr.addnstr(3, 2, f"Error: {text}", max(1, w - 4), curses.color_pair(3))
+        stdscr.addnstr(5, 2, "Press Enter to re-enter OAuth client values.", max(1, w - 4))
+        stdscr.refresh()
+        stdscr.timeout(-1)
+        ch = stdscr.getch()
+        if ch in (10, 13):
+            return True, "Re-enter OAuth client values and try again."
+        if ch in (ord("q"), 27):
+            return False, "cancelled"
+
+
+def _setup_oauth_screen(
+    stdscr: "curses._CursesWindow",
+    run_scan_after: bool = True,
+    initial_message: str = "",
+) -> None:
     try:
         curses.curs_set(1)
     except curses.error:
         pass
 
-    stdscr.clear()
-    h, w = stdscr.getmaxyx()
-    stdscr.addnstr(0, 2, "Setup OAuth", max(1, w - 4), curses.color_pair(1) | curses.A_BOLD)
-    stdscr.addnstr(2, 2, "Paste the OAuth client from Google Cloud.", max(1, w - 4))
-    stdscr.addnstr(4, 2, "Client ID:", max(1, w - 4))
-    client_id = _read_field(stdscr, 4, 14)
-    if not client_id:
-        _draw_text_screen(stdscr, "Setup OAuth", ["Cancelled."])
-        return
+    client_id = ""
+    client_secret = ""
+    entry_stage = 0  # 0 = entering client_id, 1 = entering client_secret
+    message = initial_message
+    while True:
+        stdscr.clear()
+        h, w = stdscr.getmaxyx()
+        stdscr.addnstr(0, 2, "Setup OAuth", max(1, w - 4), curses.color_pair(1) | curses.A_BOLD)
+        stdscr.addnstr(
+            1,
+            2,
+            "Paste credentials | Enter continues | Esc/Ctrl-C cancels",
+            max(1, w - 4),
+            curses.color_pair(4),
+        )
+        stdscr.addnstr(3, 4, f"1. Open Google Cloud Console: {GOOGLE_CLOUD_CONSOLE_URL}", max(1, w - 6))
+        stdscr.addnstr(4, 4, "2. Create/select a project and enable YouTube Data API v3.", max(1, w - 6))
+        stdscr.addnstr(5, 4, '3. OAuth consent screen: set User type to "External".', max(1, w - 6))
+        stdscr.addnstr(
+            6,
+            4,
+            '4. Set Publishing status to "Testing" and add yourself in "Test users".',
+            max(1, w - 6),
+        )
+        stdscr.addnstr(7, 4, "5. Create OAuth client: TVs and Limited Input devices.", max(1, w - 6))
 
-    stdscr.addnstr(6, 2, "Client secret:", max(1, w - 4))
-    client_secret = _read_field(stdscr, 6, 17, secret=True)
-    if not client_secret:
-        _draw_text_screen(stdscr, "Setup OAuth", ["Cancelled."])
-        return
+        stdscr.addnstr(9, 2, "Credentials", max(1, w - 4), curses.A_BOLD)
+        id_attr = curses.color_pair(5) | curses.A_BOLD if entry_stage == 0 else curses.A_NORMAL
+        secret_attr = curses.color_pair(5) | curses.A_BOLD if entry_stage == 1 else curses.A_NORMAL
+        stdscr.addnstr(10, 4, "Client ID:", max(1, w - 6))
+        id_display = client_id if entry_stage == 0 else ("*" * len(client_id) if client_id else "")
+        stdscr.addnstr(10, 16, id_display, max(1, w - 18), id_attr)
+        if entry_stage == 1:
+            stdscr.addnstr(12, 4, "Client secret:", max(1, w - 6))
+            stdscr.addnstr(12, 19, "*" * len(client_secret), max(1, w - 21), secret_attr)
 
-    secure_store.save_client_credentials(client_id, client_secret)
+        if message:
+            stdscr.addnstr(14, 2, message, max(1, w - 4), curses.color_pair(3))
+
+        if entry_stage == 0:
+            stdscr.move(10, min(w - 2, 16 + len(client_id)))
+        else:
+            stdscr.move(12, min(w - 2, 19 + len(client_secret)))
+
+        stdscr.refresh()
+        stdscr.timeout(-1)
+        ch = stdscr.getch()
+        if ch == CTRL_C:
+            _draw_text_screen(stdscr, "Setup OAuth", ["Cancelled."])
+            return
+        if ch == 27:
+            if _consume_escape_sequence(stdscr) == "escape":
+                _draw_text_screen(stdscr, "Setup OAuth", ["Cancelled."])
+                return
+            continue
+        if ch in (10, 13):
+            if entry_stage == 0:
+                if client_id.strip():
+                    entry_stage = 1
+                    message = ""
+                else:
+                    message = "Client ID is required."
+                continue
+            if client_id.strip() and client_secret.strip():
+                break
+            message = "Both Client ID and Client secret are required."
+            continue
+        if ch in (curses.KEY_BACKSPACE, 127, 8):
+            if entry_stage == 0:
+                client_id = client_id[:-1]
+            else:
+                client_secret = client_secret[:-1]
+            message = ""
+            continue
+        if 32 <= ch <= 126:
+            if entry_stage == 0:
+                client_id += chr(ch)
+            else:
+                client_secret += chr(ch)
+            message = ""
+
+    secure_store.save_client_credentials(client_id.strip(), client_secret.strip())
     try:
         curses.curs_set(0)
     except curses.error:
         pass
-    authorized = _authorize_oauth_screen(stdscr)
+    while True:
+        authorized, reason = _authorize_oauth_screen(stdscr)
+        if authorized:
+            break
+        if reason == "retry_credentials":
+            return _setup_oauth_screen(
+                stdscr,
+                run_scan_after=run_scan_after,
+                initial_message="Re-enter OAuth client values and try again.",
+            )
+        return
     if run_scan_after and authorized:
-        _run_cancellable_action_screen(stdscr, "Smart Scan", scan_live_and_analyze)
+        _run_cancellable_action_screen(stdscr, "Scan", scan_live_and_analyze)
 
 
-def _authorize_oauth_screen(stdscr: "curses._CursesWindow") -> bool:
+def _authorize_oauth_screen(stdscr: "curses._CursesWindow") -> Tuple[bool, Optional[str]]:
     creds = secure_store.get_client_credentials()
     if not creds:
         _draw_text_screen(stdscr, "Setup OAuth", ["Missing OAuth credentials."])
-        return False
+        return False, "missing_credentials"
 
     stdscr.clear()
     stdscr.addnstr(0, 2, "Authorize Google Account", 80, curses.color_pair(1) | curses.A_BOLD)
@@ -674,15 +803,19 @@ def _authorize_oauth_screen(stdscr: "curses._CursesWindow") -> bool:
     try:
         device = oauth.start_device_flow()
     except Exception as e:
-        _draw_text_screen(stdscr, "Authorize Google Account", [f"Error: {explain_auth_error(str(e))}"])
-        return False
+        text = explain_auth_error(str(e))
+        if text == "OAuth client ID/secret did not work. Check that you created a TV and Limited Input client.":
+            should_retry, reason = _retry_credentials_prompt(stdscr, text)
+            return False, "retry_credentials" if should_retry else reason
+        _draw_text_screen(stdscr, "Authorize Google Account", [f"Error: {text}"])
+        return False, "error"
 
     verification_url = device.get("verification_url") or device.get("verification_uri")
     user_code = device.get("user_code")
     device_code = device.get("device_code")
     if not verification_url or not user_code or not device_code:
         _draw_text_screen(stdscr, "Authorize Google Account", [f"Google returned an unexpected response: {device}"])
-        return False
+        return False, "error"
 
     cancel_event = threading.Event()
     result_q: "queue.Queue[Tuple[Optional[str], Optional[BaseException]]]" = queue.Queue(maxsize=1)
@@ -707,12 +840,11 @@ def _authorize_oauth_screen(stdscr: "curses._CursesWindow") -> bool:
     spinner = ["|", "/", "-", "\\"]
     frame = 0
     stopping = False
-    browser_message = ""
     while True:
         stdscr.clear()
         h, w = stdscr.getmaxyx()
         stdscr.addnstr(0, 2, "Authorize Google Account", max(1, w - 4), curses.color_pair(1) | curses.A_BOLD)
-        hint = "q/backspace cancels | waiting for current request to stop" if stopping else "o opens browser | q/backspace cancels"
+        hint = "q cancels | waiting for current request to stop" if stopping else "q cancels"
         stdscr.addnstr(1, 2, hint, max(1, w - 4), curses.color_pair(4))
         stdscr.addnstr(3, 2, "1. Open this URL:", max(1, w - 4), curses.A_BOLD)
         stdscr.addnstr(4, 5, str(verification_url), max(1, w - 7), curses.color_pair(4))
@@ -721,8 +853,6 @@ def _authorize_oauth_screen(stdscr: "curses._CursesWindow") -> bool:
         stdscr.addnstr(9, 2, "3. Log in with the same Google account you use for YouTube Music.", max(1, w - 4), curses.A_BOLD)
         status = "Stopping..." if stopping else f"Waiting for Google authorization... {spinner[frame % len(spinner)]}"
         stdscr.addnstr(11, 2, status, max(1, w - 4), curses.color_pair(3))
-        if browser_message:
-            stdscr.addnstr(13, 2, browser_message, max(1, w - 4), curses.color_pair(4))
         stdscr.refresh()
 
         try:
@@ -731,24 +861,23 @@ def _authorize_oauth_screen(stdscr: "curses._CursesWindow") -> bool:
                 text = explain_auth_error(str(err))
                 if "cancelled" in text.lower():
                     _draw_text_screen(stdscr, "Authorize Google Account", ["Cancelled. Account was not authorized."])
+                    return False, "cancelled"
+                if text == "OAuth client ID/secret did not work. Check that you created a TV and Limited Input client.":
+                    should_retry, reason = _retry_credentials_prompt(stdscr, text)
+                    return False, "retry_credentials" if should_retry else reason
                 else:
                     _draw_text_screen(stdscr, "Authorize Google Account", [f"Error: {text}"])
-                return False
+                return False, "error"
             _ = msg
-            return True
+            return True, None
         except queue.Empty:
             pass
 
         stdscr.timeout(120)
         ch = stdscr.getch()
-        if ch in (ord("q"), 27, curses.KEY_BACKSPACE, 127):
+        if ch == ord("q"):
             cancel_event.set()
             stopping = True
-        elif ch == ord("o") and not stopping:
-            if webbrowser.open(str(verification_url)):
-                browser_message = "Opened the authorization URL in your browser."
-            else:
-                browser_message = "Could not open browser automatically. Copy the URL above."
         frame += 1
 
 
@@ -758,13 +887,14 @@ def _ensure_authorized_screen(stdscr: "curses._CursesWindow") -> bool:
         return bool(secure_store.get_refresh_token())
     if secure_store.get_refresh_token():
         return True
-    return _authorize_oauth_screen(stdscr)
+    ok, _ = _authorize_oauth_screen(stdscr)
+    return ok
 
 
 def _smart_scan_action(stdscr: "curses._CursesWindow") -> None:
     if not _ensure_authorized_screen(stdscr):
         return
-    _run_cancellable_action_screen(stdscr, "Smart Scan", scan_live_and_analyze)
+    _run_cancellable_action_screen(stdscr, "Scan", scan_live_and_analyze)
 
 
 def _preview_plan_action(stdscr: "curses._CursesWindow") -> None:
@@ -904,7 +1034,7 @@ def curses_menu(stdscr: "curses._CursesWindow") -> None:
     selected = 0
     message = "Enter chooses | arrows/j/k move | q quits"
     actions = [
-        ("Smart scan", "Fetch live playlist and refresh duplicate report", _smart_scan_action),
+        ("Scan", "Fetch live playlist and refresh duplicate report", _smart_scan_action),
         ("Show duplicates", "Browse the most important duplicate groups", lambda s: _draw_text_screen(s, "Duplicate Groups", _duplicate_preview_lines())),
         ("Preview plan", "Create before backup and cleanup plan, no changes", _preview_plan_action),
         ("Execute dedupe", "Remove duplicates after typed confirmation", _execute_action),
@@ -915,7 +1045,7 @@ def curses_menu(stdscr: "curses._CursesWindow") -> None:
     while True:
         stdscr.clear()
         h, w = stdscr.getmaxyx()
-        stdscr.addnstr(0, 2, "YouTube Music Dedup", max(1, w - 4), curses.color_pair(1) | curses.A_BOLD)
+        stdscr.addnstr(0, 2, "YT Music Playlist Janitor", max(1, w - 4), curses.color_pair(1) | curses.A_BOLD)
         stdscr.addnstr(1, 2, message, max(1, w - 4), curses.color_pair(4))
 
         stats = _stats_lines()

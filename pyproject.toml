@@ -4,7 +4,6 @@ version = "0.1.0"
 description = "Find and clean duplicate songs in YouTube Music liked songs."
 readme = "README.md"
 requires-python = ">=3.10"
-license = "MIT"
 authors = [
   { name = "Andrew Gromyko" }
 ]
@@ -15,9 +14,8 @@ yt-music-playlist-janitor = "playlist_janitor:cli"
 
 [tool.setuptools]
 py-modules = [
-  "analyze_duplicates",
-  "dedupe_core",
-  "oauth_device",
-  "playlist_janitor",
-  "secure_store"
+  "playlist_janitor"
+]
+packages = [
+  "utils"
 ]

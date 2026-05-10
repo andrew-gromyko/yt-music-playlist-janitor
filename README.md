@@ -37,7 +37,7 @@ Controls:
 
 Menu actions:
 
-- **Smart scan**: fetch live liked songs and analyze duplicates
+- **Scan**: fetch live liked songs and analyze duplicates
 - **Show duplicates**: view duplicate groups in the terminal
 - **Preview plan**: create a before-backup and cleanup plan without changing likes
 - **Execute dedupe**: remove duplicates after typed confirmation
