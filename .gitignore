@@ -1,0 +1,24 @@
+# Local Python state
+__pycache__/
+*.py[cod]
+.venv/
+.venv*/
+build/
+dist/
+*.egg-info/
+
+# Local OAuth/token data
+oauth_token.json
+credentials.json
+
+# Generated exports and reports
+liked_music_export.csv
+liked_music_duplicate_groups.csv
+liked_playlist_export.csv
+liked_playlist_duplicate_video_ids.csv
+duplicate_report/
+
+# OS/editor noise
+.DS_Store
+.idea/
+.vscode/
