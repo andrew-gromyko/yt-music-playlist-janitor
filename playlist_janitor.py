@@ -397,10 +397,34 @@ def local_status() -> None:
     print_stats(stats, "Local Report")
 
 
+def authorized_account_name(access_token: str) -> str:
+    try:
+        data = live.api_get_json(access_token, "channels", {"part": "snippet", "mine": "true", "maxResults": "1"})
+    except Exception:
+        return "Connected YouTube account"
+
+    items = data.get("items", [])
+    if not items:
+        return "Connected YouTube account"
+    title_text = str(items[0].get("snippet", {}).get("title", "")).strip()
+    return title_text or "Connected YouTube account"
+
+
 def setup_credentials() -> None:
     secure_store.reset_client_credentials()
     print("Credentials saved.")
-    print("Starting account authorization and first scan.")
+    access_token = require_live_access()
+    account_name = authorized_account_name(access_token)
+    print()
+    print(ok("😎 Account connected."))
+    print(f"  Account: {account_name}")
+    print()
+    try:
+        input("Press Enter to continue with a scan.")
+    except KeyboardInterrupt:
+        print()
+        print("Stopped before scan.")
+        return
     scan_live_and_analyze()
 
 
@@ -595,6 +619,26 @@ def _run_cancellable_action_screen(
         frame += 1
 
 
+def _connected_continue_scan_screen(stdscr: "curses._CursesWindow", account_name: str) -> bool:
+    while True:
+        stdscr.clear()
+        h, w = stdscr.getmaxyx()
+        stdscr.addnstr(0, 2, "Account Connected", max(1, w - 4), curses.color_pair(1) | curses.A_BOLD)
+        stdscr.addnstr(1, 2, "Enter starts scan | q/backspace returns", max(1, w - 4), curses.color_pair(4))
+        stdscr.addnstr(3, 2, "😎 Account got connected.", max(1, w - 4), curses.color_pair(2) | curses.A_BOLD)
+        stdscr.addnstr(5, 2, "Account", max(1, w - 4), curses.A_BOLD)
+        stdscr.addnstr(6, 4, account_name, max(1, w - 6), curses.color_pair(4))
+        stdscr.addnstr(8, 2, "Press Enter to continue with a scan.", max(1, w - 4))
+        stdscr.refresh()
+
+        stdscr.timeout(-1)
+        ch = stdscr.getch()
+        if ch in (10, 13):
+            return True
+        if ch in (ord("q"), 27, curses.KEY_BACKSPACE, 127):
+            return False
+
+
 def _confirm_dedupe_screen(stdscr: "curses._CursesWindow") -> bool:
     typed = ""
     while True:
@@ -773,9 +817,11 @@ def _setup_oauth_screen(
         curses.curs_set(0)
     except curses.error:
         pass
+    account_name = "Connected YouTube account"
     while True:
         authorized, reason = _authorize_oauth_screen(stdscr)
         if authorized:
+            account_name = reason or account_name
             break
         if reason == "retry_credentials":
             return _setup_oauth_screen(
@@ -785,7 +831,8 @@ def _setup_oauth_screen(
             )
         return
     if run_scan_after and authorized:
-        _run_cancellable_action_screen(stdscr, "Scan", scan_live_and_analyze)
+        if _connected_continue_scan_screen(stdscr, account_name):
+            _run_cancellable_action_screen(stdscr, "Scan", scan_live_and_analyze)
 
 
 def _authorize_oauth_screen(stdscr: "curses._CursesWindow") -> Tuple[bool, Optional[str]]:
@@ -830,7 +877,7 @@ def _authorize_oauth_screen(stdscr: "curses._CursesWindow") -> Tuple[bool, Optio
             if not token.refresh_token:
                 raise live.ApiError("Google did not return a refresh token. Revoke app access and authorize again.")
             secure_store.save_refresh_token(token.refresh_token)
-            result_q.put(("Authorized successfully.", None))
+            result_q.put((authorized_account_name(token.access_token), None))
         except Exception as e:
             result_q.put((None, e))
 
@@ -868,8 +915,7 @@ def _authorize_oauth_screen(stdscr: "curses._CursesWindow") -> Tuple[bool, Optio
                 else:
                     _draw_text_screen(stdscr, "Authorize Google Account", [f"Error: {text}"])
                 return False, "error"
-            _ = msg
-            return True, None
+            return True, msg
         except queue.Empty:
             pass
 

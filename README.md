@@ -39,7 +39,7 @@ Menu actions:
 - **Show duplicates**: view duplicate groups in the terminal
 - **Preview plan**: create a before-backup and cleanup plan without changing likes
 - **Execute dedupe**: remove duplicates after typed confirmation
-- **Setup OAuth**: save or replace Google OAuth credentials, authorize the account, then run a first scan
+- **Setup OAuth**: save or replace Google OAuth credentials, authorize the account, then continue into a first scan
 
 The main screen shows the latest local duplicate status and how long ago the last live scan ran. Before cleanup, the app refreshes the scan automatically if it is more than 20 minutes old.
 
@@ -62,7 +62,7 @@ Playlist Janitor uses your own Google Cloud OAuth client. It never asks for your
 11. Complete the Google device-code authorization shown in the terminal.
 12. Log in with the same Google account you use for YouTube Music.
 
-After authorization succeeds, Playlist Janitor runs the first scan automatically.
+After authorization succeeds, Playlist Janitor shows the connected account and waits for Enter before starting the first scan.
 
 The app requests this YouTube scope:
 
